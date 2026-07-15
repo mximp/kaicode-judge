@@ -29,14 +29,21 @@ async function withRetry(fn, label = 'request') {
     try {
       return await fn();
     } catch (err) {
+      // Octokit RequestError exposes err.status (HTTP code) and a deprecated
+      // err.code getter that emits a warning.  Check err.status first; only
+      // fall through to err.code for low-level Node.js network errors which
+      // have no status property.
       const isRetryable =
         (err.response && RETRYABLE_STATUS_CODES.includes(err.response.status)) ||
-        err.code === 'ECONNABORTED' ||
-        err.code === 'ETIMEDOUT' ||
-        err.code === 'ECONNRESET' ||
-        err.code === 'ENOTFOUND' ||
-        err.code === 'EAI_AGAIN' ||
-        err.code === 'ERR_NETWORK' ||
+        (err.status && RETRYABLE_STATUS_CODES.includes(err.status)) ||
+        (!err.status && (
+          err.code === 'ECONNABORTED' ||
+          err.code === 'ETIMEDOUT' ||
+          err.code === 'ECONNRESET' ||
+          err.code === 'ENOTFOUND' ||
+          err.code === 'EAI_AGAIN' ||
+          err.code === 'ERR_NETWORK'
+        )) ||
         (err.message && err.message.includes('timeout'));
 
       if (!isRetryable || attempt === MAX_RETRIES) {
@@ -44,7 +51,7 @@ async function withRetry(fn, label = 'request') {
       }
 
       const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
-      console.log(`[withRetry] ${label} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${delayMs}ms... (${err.message || err.code || 'unknown error'})`);
+      console.log(`[withRetry] ${label} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${delayMs}ms... (${err.message || (err.status ? `HTTP ${err.status}` : err.code) || 'unknown error'})`);
       await delay(delayMs);
     }
   }
